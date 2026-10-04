@@ -1,8 +1,8 @@
 cask "md-view" do
   # version and sha256 are rewritten by md-view's release workflow
   # (scripts/update-cask.sh) once the notarized DMG is published.
-  version "0.3.1"
-  sha256 "aa7dd05b7807c2c2ced5a05d15f47af450ede8dea02791994e36c5ca785b0e6e"
+  version "0.4.0"
+  sha256 "d6a4a82e47c9bfe2d2f2edac4f9aac3c1e0901f172b905ebf6253c9097f7ca4b"
 
   url "https://github.com/lifeart/md-view/releases/download/v#{version}/md-view-#{version}.dmg"
   name "MDv"
