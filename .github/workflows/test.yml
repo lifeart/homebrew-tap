@@ -1,0 +1,69 @@
+name: Test
+
+# Every push here is either a hand edit to a cask or md-view's release workflow
+# pointing the cask at a new release — both deserve a real `brew install` on a
+# clean machine before a reader's `brew upgrade` finds them. The weekly run
+# catches the one failure no push can: a release whose cask update never
+# arrived (an expired deploy key, a failed job nobody re-ran).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  md-view:
+    name: Install, check and zap the md-view cask
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      # livecheck asks the GitHub API for the latest release; unauthenticated
+      # that is 60 requests an hour per runner IP, shared with strangers.
+      HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+    steps:
+      # Also taps this checkout as lifeart/tap.
+      - uses: Homebrew/actions/setup-homebrew@main
+
+      - name: brew style
+        run: brew style --cask lifeart/tap/md-view
+
+      # Not --new: that adds homebrew/cask's notability bar, which is the
+      # reason this tap exists.
+      - name: brew audit (strict, online)
+        run: brew audit --cask --strict --online lifeart/tap/md-view
+
+      - name: The cask points at the latest release
+        run: |
+          brew livecheck --cask --json lifeart/tap/md-view | tee livecheck.json
+          jq -e '.[0].version.outdated == false' livecheck.json >/dev/null || {
+            echo "::error::Casks/md-view.rb is behind the latest md-view release — did the release workflow's homebrew-tap job run?"
+            exit 1
+          }
+
+      # The fully qualified name is also what trusts the cask (tap trust).
+      - name: brew install
+        run: brew install --cask lifeart/tap/md-view
+
+      - name: The installed app is the notarized release the cask names
+        run: |
+          app=/Applications/MDv.app
+          want=$(brew info --cask --json=v2 lifeart/tap/md-view | jq -r '.casks[0].version')
+          got=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")
+          [ "$got" = "$want" ] || { echo "::error::the cask says $want but the bundle says $got"; exit 1; }
+          codesign --verify --deep --strict "$app"
+          spctl --status
+          spctl -a -vv -t exec "$app" 2>&1 | tee spctl.txt
+          grep -q 'source=Notarized Developer ID' spctl.txt \
+            || { echo "::error::Gatekeeper does not see $app as notarized"; exit 1; }
+
+      - name: brew uninstall --zap
+        run: |
+          brew uninstall --cask --zap lifeart/tap/md-view
+          [ ! -e /Applications/MDv.app ] || { echo "::error::MDv.app is still installed"; exit 1; }
